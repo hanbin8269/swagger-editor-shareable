@@ -27,6 +27,10 @@ declare global {
         standalone: unknown;
       };
     };
+    LZString: {
+      compressToEncodedURIComponent: (input: string) => string;
+      decompressFromEncodedURIComponent: (input: string) => string | null;
+    };
   }
 }
 
@@ -36,9 +40,11 @@ const SwaggerEditor: React.FC = () => {
   const [currentSpec, setCurrentSpec] = useState<OpenAPISpec | null>(null);
   const [isValidJson, setIsValidJson] = useState<boolean>(true);
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
+  const [compressionStats, setCompressionStats] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'editor' | 'preview'>('editor');
   const swaggerUIRef = useRef<HTMLDivElement>(null);
   const [swaggerUILoaded, setSwaggerUILoaded] = useState<boolean>(false);
+  const [lzStringLoaded, setLzStringLoaded] = useState<boolean>(false);
 
   // 예제 OpenAPI 스키마
   const exampleSchema: OpenAPISpec = {
@@ -85,28 +91,34 @@ const SwaggerEditor: React.FC = () => {
     }
   };
 
-  // SwaggerUI 라이브러리 로드
+  // SwaggerUI와 LZ-string 라이브러리 로드
   useEffect(() => {
-    const loadSwaggerUI = () => {
-      if (typeof window !== 'undefined') {
-        setSwaggerUILoaded(true);
-        return;
+    const loadLibraries = () => {
+      // SwaggerUI 로드
+      if (typeof window !== 'undefined' && !window.SwaggerUIBundle) {
+        const swaggerScript = document.createElement('script');
+        swaggerScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-bundle.min.js';
+        swaggerScript.onload = () => setSwaggerUILoaded(true);
+        document.head.appendChild(swaggerScript);
+
+        const swaggerStyle = document.createElement('link');
+        swaggerStyle.rel = 'stylesheet';
+        swaggerStyle.href = 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui.min.css';
+        document.head.appendChild(swaggerStyle);
       }
 
-      if (typeof window !== 'undefined') {
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-bundle.min.js';
-        script.onload = () => setSwaggerUILoaded(true);
-        document.head.appendChild(script);
-
-        const style = document.createElement('link');
-        style.rel = 'stylesheet';
-        style.href = 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui.min.css';
-        document.head.appendChild(style);
+      // LZ-string 로드
+      if (typeof window !== 'undefined' && !window.LZString) {
+        const lzScript = document.createElement('script');
+        lzScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js';
+        lzScript.onload = () => setLzStringLoaded(true);
+        document.head.appendChild(lzScript);
+      } else if (window.LZString) {
+        setLzStringLoaded(true);
       }
     };
 
-    loadSwaggerUI();
+    loadLibraries();
   }, []);
 
   // SwaggerUI 초기화
@@ -131,7 +143,7 @@ const SwaggerEditor: React.FC = () => {
     }
   }, [swaggerUILoaded, currentSpec, activeTab]);
 
-  // URL에서 스키마 로드
+  // URL에서 스키마 로드 (압축 지원)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
@@ -139,17 +151,42 @@ const SwaggerEditor: React.FC = () => {
       
       if (encodedSchema) {
         try {
-          // 유니코드 안전한 Base64 디코딩
-          const decodedSchema = decodeURIComponent(atob(encodedSchema));
+          let decodedSchema: string;
+          
+          // 압축 형식 감지 및 디코딩
+          if (encodedSchema.startsWith('lz:')) {
+            // LZ-string 압축 디코딩
+            if (lzStringLoaded && window.LZString) {
+              const compressed = encodedSchema.substring(3); // 'lz:' 제거
+              const decompressed = window.LZString.decompressFromEncodedURIComponent(compressed);
+              if (decompressed === null) throw new Error('LZ 압축 해제 실패');
+              decodedSchema = decompressed;
+              console.log('🗜️ LZ 압축 해제 완료');
+            } else {
+              throw new Error('LZ-string 라이브러리 로딩 필요');
+            }
+          } else if (encodedSchema.startsWith('b64:')) {
+            // Base64 디코딩
+            const base64Data = encodedSchema.substring(4); // 'b64:' 제거
+            decodedSchema = decodeURIComponent(atob(base64Data));
+            console.log('📦 Base64 디코딩 완료');
+          } else {
+            // 레거시 지원 (접두사 없음 = Base64)
+            decodedSchema = decodeURIComponent(atob(encodedSchema));
+            console.log('🔄 레거시 Base64 디코딩');
+          }
+          
           const parsedSchema = JSON.parse(decodedSchema);
           setJsonInput(JSON.stringify(parsedSchema, null, 2));
           setCurrentSpec(parsedSchema);
           setIsValidJson(true);
+          
         } catch (error) {
-          console.error('Failed to load schema from URL:', error);
+          console.error('URL에서 스키마 로드 실패:', error);
           // URL에서 로드 실패 시 기본 예제 로드
           setJsonInput(JSON.stringify(exampleSchema, null, 2));
           setCurrentSpec(exampleSchema);
+          alert('공유된 스키마를 로드하는데 실패했습니다. 기본 예제를 로드합니다.');
         }
       } else {
         setJsonInput(JSON.stringify(exampleSchema, null, 2));
@@ -157,7 +194,7 @@ const SwaggerEditor: React.FC = () => {
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [lzStringLoaded]); // LZ-string 로딩 완료 후 재시도
 
   const validateAndParseJson = (jsonString: string): OpenAPISpec | null => {
     try {
@@ -187,21 +224,58 @@ const SwaggerEditor: React.FC = () => {
 
     if (typeof window !== 'undefined') {
       try {
-        // 유니코드 안전한 Base64 인코딩
-        const encoded = btoa(encodeURIComponent(jsonInput));
-        const baseUrl = window.location.origin + window.location.pathname;
-        const url = `${baseUrl}?schema=${encoded}`;
+        // 1단계: JSON 최소화 (공백 제거)
+        const minifiedJson = JSON.stringify(JSON.parse(jsonInput));
+        const originalSize = jsonInput.length;
+        const minifiedSize = minifiedJson.length;
         
-        if (url.length > 8192) {
-          alert(`생성된 URL이 너무 깁니다 (${url.length}자). 일부 서버에서 문제가 될 수 있습니다.\n\n대안:\n• JSON 파일로 다운로드해서 공유\n• 스키마를 간소화\n• 외부 스토리지 사용\n\n그래도 진행하시겠습니까?`);
+        let finalEncoded: string;
+        let compressionInfo: string;
+        
+        if (lzStringLoaded && window.LZString) {
+          // 2단계: LZ-string 압축 적용
+          const compressed = window.LZString.compressToEncodedURIComponent(minifiedJson);
+          
+          // 3단계: 기존 방식과 비교
+          const traditionalEncoded = btoa(encodeURIComponent(minifiedJson));
+          
+          // 더 짧은 방식 선택
+          if (compressed.length < traditionalEncoded.length) {
+            finalEncoded = 'lz:' + compressed; // LZ 압축 표시
+            compressionInfo = `LZ 압축 사용: ${originalSize}자 → ${compressed.length}자 (${Math.round((1 - compressed.length / originalSize) * 100)}% 압축)`;
+          } else {
+            finalEncoded = 'b64:' + traditionalEncoded; // Base64 압축 표시
+            compressionInfo = `Base64 사용: ${originalSize}자 → ${traditionalEncoded.length}자 (${Math.round((1 - traditionalEncoded.length / originalSize) * 100)}% 압축)`;
+          }
+        } else {
+          // LZ-string 로딩 안됨 - 기존 방식 사용
+          finalEncoded = 'b64:' + btoa(encodeURIComponent(minifiedJson));
+          compressionInfo = `Base64 사용: ${originalSize}자 → ${finalEncoded.length}자 (LZ-string 로딩 중...)`;
         }
         
-        console.log(`생성된 URL 길이: ${url.length}자`);
+        const baseUrl = window.location.origin + window.location.pathname;
+        const url = `${baseUrl}?schema=${finalEncoded}`;
+        
+        // 압축 결과 로깅 및 저장
+        console.log('🗜️ 압축 결과:', compressionInfo);
+        console.log(`📏 최종 URL 길이: ${url.length}자`);
+        setCompressionStats(compressionInfo);
+        
+        // URL 길이 체크
+        if (url.length > 16384) {
+          const proceed = confirm(`생성된 URL이 깁니다 (${url.length}자).\n${compressionInfo}\n\n일부 서버에서 문제가 될 수 있습니다. 계속하시겠습니까?`);
+          if (!proceed) return;
+        } else {
+          // 성공 메시지로 압축 결과 표시
+          console.log('✅ ' + compressionInfo);
+        }
+        
         setShareableUrl(url);
         window.history.pushState({}, '', url);
+        
       } catch (error) {
         console.error('URL 생성 오류:', error);
-        alert('URL 생성 중 오류가 발생했습니다. JSON에 특수문자가 포함되어 있을 수 있습니다.');
+        alert('URL 생성 중 오류가 발생했습니다. JSON 형식을 확인해주세요.');
       }
     }
   };
@@ -451,7 +525,19 @@ const SwaggerEditor: React.FC = () => {
               >
                 <Share style={{ width: '20px', height: '20px' }} />
                 공유 링크 생성
+                {lzStringLoaded && <span style={{ fontSize: '12px', opacity: 0.8 }}>🗜️</span>}
               </button>
+              
+              {/* 압축 라이브러리 상태 표시 */}
+              <div style={{
+                fontSize: '12px', color: '#6b7280', textAlign: 'center', marginTop: '8px'
+              }}>
+                {lzStringLoaded ? (
+                  <span style={{ color: '#10b981' }}>✅ 고급 압축 활성화됨</span>
+                ) : (
+                  <span style={{ color: '#f59e0b' }}>⏳ 압축 라이브러리 로딩 중...</span>
+                )}
+              </div>
             </div>
 
             {/* 공유 링크 패널 */}
@@ -492,6 +578,14 @@ const SwaggerEditor: React.FC = () => {
                   <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '12px', margin: '12px 0 0 0' }}>
                     이 링크를 공유하면 다른 사람들이 같은 스키마를 볼 수 있습니다.
                   </p>
+                  {compressionStats && (
+                    <div style={{
+                      marginTop: '12px', padding: '8px 12px', background: '#f0f9ff',
+                      border: '1px solid #0ea5e9', borderRadius: '6px', fontSize: '12px', color: '#0369a1'
+                    }}>
+                      🗜️ {compressionStats}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -505,7 +599,7 @@ const SwaggerEditor: React.FC = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {[
                     'OpenAPI 3.0 JSON 스키마를 입력하세요',
-                    '"공유 링크 생성" 버튼을 클릭하세요', 
+                    '"공유 링크 생성" 버튼을 클릭하세요 (자동 압축 적용)', 
                     '생성된 링크를 복사해서 공유하세요',
                     '링크를 받은 사람은 같은 스키마를 볼 수 있습니다'
                   ].map((text, index) => (
@@ -520,6 +614,21 @@ const SwaggerEditor: React.FC = () => {
                       <span style={{ color: '#374151', lineHeight: '24px' }}>{text}</span>
                     </div>
                   ))}
+                </div>
+                
+                {/* 압축 기능 안내 */}
+                <div style={{
+                  marginTop: '16px', padding: '12px', background: '#f0f9ff',
+                  border: '1px solid #0ea5e9', borderRadius: '8px'
+                }}>
+                  <div style={{ fontSize: '12px', color: '#0369a1', fontWeight: '600', marginBottom: '4px' }}>
+                    🗜️ 스마트 압축 기능
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#0369a1', lineHeight: '1.4' }}>
+                    • LZ 압축으로 50-80% 크기 감소<br/>
+                    • 큰 스키마도 URL로 공유 가능<br/>
+                    • 자동으로 최적 압축 방식 선택
+                  </div>
                 </div>
               </div>
             </div>
