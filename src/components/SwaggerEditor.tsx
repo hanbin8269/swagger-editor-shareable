@@ -227,7 +227,6 @@ const SwaggerEditor: React.FC = () => {
         // 1단계: JSON 최소화 (공백 제거)
         const minifiedJson = JSON.stringify(JSON.parse(jsonInput));
         const originalSize = jsonInput.length;
-        const minifiedSize = minifiedJson.length;
         
         let finalEncoded: string;
         let compressionInfo: string;
