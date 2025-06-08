@@ -14,13 +14,19 @@ interface OpenAPISpec {
     url: string;
     description?: string;
   }>;
-  paths: Record<string, any>;
-  components?: Record<string, any>;
+  paths: Record<string, unknown>;
+  components?: Record<string, unknown>;
 }
 
 declare global {
   interface Window {
-    SwaggerUIBundle: any;
+    SwaggerUIBundle: {
+      (config: Record<string, unknown>): void;
+      presets: {
+        apis: unknown;
+        standalone: unknown;
+      };
+    };
   }
 }
 
@@ -82,7 +88,7 @@ const SwaggerEditor: React.FC = () => {
   // SwaggerUI 라이브러리 로드
   useEffect(() => {
     const loadSwaggerUI = () => {
-      if (typeof window !== 'undefined' && window.SwaggerUIBundle) {
+      if (typeof window !== 'undefined') {
         setSwaggerUILoaded(true);
         return;
       }
@@ -119,8 +125,8 @@ const SwaggerEditor: React.FC = () => {
           showExtensions: true,
           showCommonExtensions: true
         });
-      } catch (error) {
-        console.error('SwaggerUI 초기화 오류:', error);
+      } catch {
+        console.error('SwaggerUI 초기화 오류');
       }
     }
   }, [swaggerUILoaded, currentSpec, activeTab]);
@@ -138,14 +144,15 @@ const SwaggerEditor: React.FC = () => {
           setJsonInput(JSON.stringify(parsedSchema, null, 2));
           setCurrentSpec(parsedSchema);
           setIsValidJson(true);
-        } catch (error) {
-          console.error('Failed to load schema from URL:', error);
+        } catch {
+          console.error('Failed to load schema from URL');
         }
       } else {
         setJsonInput(JSON.stringify(exampleSchema, null, 2));
         setCurrentSpec(exampleSchema);
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const validateAndParseJson = (jsonString: string): OpenAPISpec | null => {
@@ -154,7 +161,7 @@ const SwaggerEditor: React.FC = () => {
       setCurrentSpec(parsed);
       setIsValidJson(true);
       return parsed;
-    } catch (error) {
+    } catch {
       setIsValidJson(false);
       return null;
     }
@@ -181,7 +188,7 @@ const SwaggerEditor: React.FC = () => {
         const url = `${baseUrl}?schema=${encoded}`;
         setShareableUrl(url);
         window.history.pushState({}, '', url);
-      } catch (error) {
+      } catch {
         alert('URL 생성 중 오류가 발생했습니다.');
       }
     }
@@ -192,7 +199,7 @@ const SwaggerEditor: React.FC = () => {
       await navigator.clipboard.writeText(shareableUrl);
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
-    } catch (error) {
+    } catch {
       alert('클립보드 복사에 실패했습니다.');
     }
   };
