@@ -192,17 +192,16 @@ const SwaggerEditor: React.FC = () => {
         const baseUrl = window.location.origin + window.location.pathname;
         const url = `${baseUrl}?schema=${encoded}`;
         
-        // URL 길이 체크 (브라우저 제한: 보통 2048자)
-        if (url.length > 2048) {
-          alert('스키마가 너무 커서 URL로 공유할 수 없습니다. 파일로 다운로드해서 공유해주세요.');
-          return;
+        if (url.length > 8192) {
+          alert(`생성된 URL이 너무 깁니다 (${url.length}자). 일부 서버에서 문제가 될 수 있습니다.\n\n대안:\n• JSON 파일로 다운로드해서 공유\n• 스키마를 간소화\n• 외부 스토리지 사용\n\n그래도 진행하시겠습니까?`);
         }
         
+        console.log(`생성된 URL 길이: ${url.length}자`);
         setShareableUrl(url);
         window.history.pushState({}, '', url);
       } catch (error) {
         console.error('URL 생성 오류:', error);
-        alert('URL 생성 중 오류가 발생했습니다. JSON에 특수문자가 포함되어 있거나 크기가 너무 클 수 있습니다.');
+        alert('URL 생성 중 오류가 발생했습니다. JSON에 특수문자가 포함되어 있을 수 있습니다.');
       }
     }
   };
