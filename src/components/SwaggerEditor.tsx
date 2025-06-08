@@ -139,13 +139,17 @@ const SwaggerEditor: React.FC = () => {
       
       if (encodedSchema) {
         try {
-          const decodedSchema = atob(encodedSchema);
+          // 유니코드 안전한 Base64 디코딩
+          const decodedSchema = decodeURIComponent(atob(encodedSchema));
           const parsedSchema = JSON.parse(decodedSchema);
           setJsonInput(JSON.stringify(parsedSchema, null, 2));
           setCurrentSpec(parsedSchema);
           setIsValidJson(true);
-        } catch {
-          console.error('Failed to load schema from URL');
+        } catch (error) {
+          console.error('Failed to load schema from URL:', error);
+          // URL에서 로드 실패 시 기본 예제 로드
+          setJsonInput(JSON.stringify(exampleSchema, null, 2));
+          setCurrentSpec(exampleSchema);
         }
       } else {
         setJsonInput(JSON.stringify(exampleSchema, null, 2));
@@ -183,13 +187,22 @@ const SwaggerEditor: React.FC = () => {
 
     if (typeof window !== 'undefined') {
       try {
-        const encoded = btoa(jsonInput);
+        // 유니코드 안전한 Base64 인코딩
+        const encoded = btoa(encodeURIComponent(jsonInput));
         const baseUrl = window.location.origin + window.location.pathname;
         const url = `${baseUrl}?schema=${encoded}`;
+        
+        // URL 길이 체크 (브라우저 제한: 보통 2048자)
+        if (url.length > 2048) {
+          alert('스키마가 너무 커서 URL로 공유할 수 없습니다. 파일로 다운로드해서 공유해주세요.');
+          return;
+        }
+        
         setShareableUrl(url);
         window.history.pushState({}, '', url);
-      } catch {
-        alert('URL 생성 중 오류가 발생했습니다.');
+      } catch (error) {
+        console.error('URL 생성 오류:', error);
+        alert('URL 생성 중 오류가 발생했습니다. JSON에 특수문자가 포함되어 있거나 크기가 너무 클 수 있습니다.');
       }
     }
   };
