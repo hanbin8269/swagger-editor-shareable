@@ -150,21 +150,21 @@ const SwaggerEditor: React.FC = () => {
       const encodedSchema = urlParams.get('schema');
       
       if (encodedSchema) {
+        // LZ-string 압축 스키마인데 라이브러리가 아직 로드되지 않았다면, 아무것도 하지 않고 대기
+        if (encodedSchema.startsWith('lz:') && (!lzStringLoaded || !window.LZString)) {
+          return;
+        }
         try {
           let decodedSchema: string;
           
           // 압축 형식 감지 및 디코딩
           if (encodedSchema.startsWith('lz:')) {
             // LZ-string 압축 디코딩
-            if (lzStringLoaded && window.LZString) {
-              const compressed = encodedSchema.substring(3); // 'lz:' 제거
-              const decompressed = window.LZString.decompressFromEncodedURIComponent(compressed);
-              if (decompressed === null) throw new Error('LZ 압축 해제 실패');
-              decodedSchema = decompressed;
-              console.log('🗜️ LZ 압축 해제 완료');
-            } else {
-              throw new Error('LZ-string 라이브러리 로딩 필요');
-            }
+            const compressed = encodedSchema.substring(3); // 'lz:' 제거
+            const decompressed = window.LZString.decompressFromEncodedURIComponent(compressed);
+            if (decompressed === null) throw new Error('LZ 압축 해제 실패');
+            decodedSchema = decompressed;
+            console.log('🗜️ LZ 압축 해제 완료');
           } else if (encodedSchema.startsWith('b64:')) {
             // Base64 디코딩
             const base64Data = encodedSchema.substring(4); // 'b64:' 제거
@@ -227,51 +227,35 @@ const SwaggerEditor: React.FC = () => {
         // 1단계: JSON 최소화 (공백 제거)
         const minifiedJson = JSON.stringify(JSON.parse(jsonInput));
         const originalSize = jsonInput.length;
-        
-        let finalEncoded: string;
-        let compressionInfo: string;
-        
+
         if (lzStringLoaded && window.LZString) {
-          // 2단계: LZ-string 압축 적용
+          // LZ-string 압축만 사용
           const compressed = window.LZString.compressToEncodedURIComponent(minifiedJson);
-          
-          // 3단계: 기존 방식과 비교
-          const traditionalEncoded = btoa(encodeURIComponent(minifiedJson));
-          
-          // 더 짧은 방식 선택
-          if (compressed.length < traditionalEncoded.length) {
-            finalEncoded = 'lz:' + compressed; // LZ 압축 표시
-            compressionInfo = `LZ 압축 사용: ${originalSize}자 → ${compressed.length}자 (${Math.round((1 - compressed.length / originalSize) * 100)}% 압축)`;
+          const finalEncoded = 'lz:' + compressed; // LZ 압축 표시
+          const compressionInfo = `LZ 압축: ${originalSize}자 → ${compressed.length}자 (${Math.round((1 - compressed.length / originalSize) * 100)}% 압축)`;
+
+          const baseUrl = window.location.origin + window.location.pathname;
+          const url = `${baseUrl}?schema=${finalEncoded}`;
+
+          // 압축 결과 로깅 및 저장
+          console.log('🗜️ 압축 결과:', compressionInfo);
+          console.log(`📏 최종 URL 길이: ${url.length}자`);
+          setCompressionStats(compressionInfo);
+
+          // URL 길이 체크
+          if (url.length > 16384) {
+            const proceed = confirm(`생성된 URL이 깁니다 (${url.length}자).\n${compressionInfo}\n\n일부 서버에서 문제가 될 수 있습니다. 계속하시겠습니까?`);
+            if (!proceed) return;
           } else {
-            finalEncoded = 'b64:' + traditionalEncoded; // Base64 압축 표시
-            compressionInfo = `Base64 사용: ${originalSize}자 → ${traditionalEncoded.length}자 (${Math.round((1 - traditionalEncoded.length / originalSize) * 100)}% 압축)`;
+            // 성공 메시지로 압축 결과 표시
+            console.log('✅ ' + compressionInfo);
           }
+
+          setShareableUrl(url);
+          window.history.pushState({}, '', url);
         } else {
-          // LZ-string 로딩 안됨 - 기존 방식 사용
-          finalEncoded = 'b64:' + btoa(encodeURIComponent(minifiedJson));
-          compressionInfo = `Base64 사용: ${originalSize}자 → ${finalEncoded.length}자 (LZ-string 로딩 중...)`;
+          alert('압축 라이브러리가 아직 로드되지 않았습니다. 잠시 후 다시 시도해주세요.');
         }
-        
-        const baseUrl = window.location.origin + window.location.pathname;
-        const url = `${baseUrl}?schema=${finalEncoded}`;
-        
-        // 압축 결과 로깅 및 저장
-        console.log('🗜️ 압축 결과:', compressionInfo);
-        console.log(`📏 최종 URL 길이: ${url.length}자`);
-        setCompressionStats(compressionInfo);
-        
-        // URL 길이 체크
-        if (url.length > 16384) {
-          const proceed = confirm(`생성된 URL이 깁니다 (${url.length}자).\n${compressionInfo}\n\n일부 서버에서 문제가 될 수 있습니다. 계속하시겠습니까?`);
-          if (!proceed) return;
-        } else {
-          // 성공 메시지로 압축 결과 표시
-          console.log('✅ ' + compressionInfo);
-        }
-        
-        setShareableUrl(url);
-        window.history.pushState({}, '', url);
-        
       } catch (error) {
         console.error('URL 생성 오류:', error);
         alert('URL 생성 중 오류가 발생했습니다. JSON 형식을 확인해주세요.');
